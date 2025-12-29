@@ -1,0 +1,640 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  STUDENT
+  COUNSELOR
+  ADMIN
+}
+
+enum DepartmentCode {
+  COE
+  CCS
+  CSM
+  CED
+  CASS
+  CEBA
+  CHS
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum TokenType {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+  REFRESH
+}
+
+enum Sex {
+  MALE
+  FEMALE
+}
+
+enum MoodType {
+  VERY_HAPPY
+  HAPPY
+  NEUTRAL
+  SAD
+  VERY_SAD
+  ANXIOUS
+  STRESSED
+  CALM
+  ENERGETIC
+  TIRED
+  ANGRY
+  CONTENT
+}
+
+enum MenstrualFlowType {
+  SPOTTING
+  LIGHT
+  MEDIUM
+  HEAVY
+}
+
+enum CyclePhase {
+  MENSTRUATION
+  FOLLICULAR
+  OVULATION
+  LUTEAL
+}
+
+enum SymptomSeverity {
+  MILD
+  MODERATE
+  SEVERE
+}
+
+model User {
+  id                    String            @id @default(uuid())
+  email                 String            @unique
+  emailVerified         Boolean           @default(false)
+  password              String
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  role                  Role              @default(STUDENT)
+  appointments          Appointment[]     @relation("UserAppointments")
+  counselorAppointments Appointment[]     @relation("CounselorAppointments")
+  studentProfile        StudentProfile?
+  counselorProfile      CounselorProfile?
+  tokens                Token[]
+  moodEntries           MoodEntry[]       @relation("UserMoodEntries")
+  menstrualCycles       MenstrualCycle[]  @relation("UserMenstrualCycles")
+  emergencyAlerts       EmergencyAlert[]  @relation("UserEmergencies")
+  digitalExcuses        DigitalExcuse[]   @relation("UserExcuses")
+  issuedExcuses         DigitalExcuse[]   @relation("CounselorExcuses")
+  journalEntries        JournalEntry[]    @relation("UserJournals")
+  ventPosts             VentPost[]        @relation("UserVentPosts")
+  ventReports           VentReport[]      @relation("UserVentReports")
+  warnings              UserWarning[]     @relation("UserWarnings")
+  streak                UserStreak?       @relation("UserStreak")
+  taskCompletions       TaskCompletion[]  @relation("UserTaskCompletions")
+  counselorNotes        SessionNote[]     @relation("CounselorNotes")
+  studentNotes          SessionNote[]     @relation("StudentNotes")
+  monthlySummaries      MonthlySummary[]  @relation("UserMonthlySummaries")
+  notifications         Notification[]    @relation("UserNotifications")
+  previousPasswords     String[]
+}
+
+model Token {
+  id        String    @id @default(cuid())
+  type      TokenType
+  token     String    @unique
+  expiresAt DateTime
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Appointment {
+  id            String            @id @default(cuid())
+  userId        String
+  counselorId   String
+  startTime     DateTime
+  endTime       DateTime
+  status        AppointmentStatus @default(PENDING)
+  notes         String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  user          User              @relation("UserAppointments", fields: [userId], references: [id])
+  counselor     User              @relation("CounselorAppointments", fields: [counselorId], references: [id])
+  digitalExcuse DigitalExcuse?
+  sessionNote   SessionNote?
+
+  @@index([userId])
+  @@index([counselorId])
+  @@index([startTime])
+}
+
+model CounselorProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  name    String?
+  sex     Sex
+  office  String?
+  phone   String?
+  profile String?
+  bio     String?
+
+  // ⬇️ OPPOSITE RELATION FIELD
+  departments Department[] @relation("CounselorDepartments")
+
+  user User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+model StudentProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  studentNumber String     @unique
+  name          String?
+  yearLevel     Int
+  sex           Sex
+  course        String
+  profile       String?
+  bio           String?
+  departmentId  String
+  department    Department @relation(fields: [departmentId], references: [id])
+
+  user User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+model Department {
+  id          String         @id @default(cuid())
+  code        DepartmentCode @unique
+  name        String
+  description String?
+
+  students   StudentProfile[]
+  counselors CounselorProfile[] @relation("CounselorDepartments")
+}
+
+model MoodEntry {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("UserMoodEntries", fields: [userId], references: [id], onDelete: Cascade)
+
+  date       DateTime
+  moods      MoodType[]
+  intensity  Int        @default(5)
+  notes      String?
+  triggers   String[]   @default([])
+  activities String[]   @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date]) // ← ADD THIS LINE
+  @@index([userId, date])
+  @@index([userId])
+}
+
+model MenstrualCycle {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("UserMenstrualCycles", fields: [userId], references: [id], onDelete: Cascade)
+
+  startDate    DateTime
+  endDate      DateTime?
+  cycleLength  Int? // Days in cycle
+  periodLength Int? // Days of menstruation
+
+  isActive Boolean @default(true) // Current cycle
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  dailyLogs MenstrualDailyLog[]
+  symptoms  MenstrualSymptom[]
+
+  @@index([userId, startDate])
+  @@index([userId, isActive])
+}
+
+model MenstrualDailyLog {
+  id      String         @id @default(cuid())
+  cycleId String
+  cycle   MenstrualCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+
+  date       DateTime
+  dayOfCycle Int // Day number in cycle
+
+  flowType MenstrualFlowType?
+  phase    CyclePhase?
+
+  // Physical tracking
+  temperature   Float? // Basal body temperature
+  cervicalMucus String? // Description
+
+  // Notes
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cycleId, date])
+  @@index([cycleId, date])
+}
+
+model MenstrualSymptom {
+  id      String         @id @default(cuid())
+  cycleId String
+  cycle   MenstrualCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+
+  date     DateTime
+  symptom  String // e.g., "cramps", "headache", "bloating"
+  severity SymptomSeverity
+  notes    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([cycleId, date])
+  @@index([cycleId])
+}
+
+enum EmergencyType {
+  CRISIS
+  MENTAL_HEALTH
+  SAFETY_CONCERN
+  URGENT_COUNSELING
+  OTHER
+}
+
+enum EmergencyStatus {
+  ACTIVE
+  RESPONDED
+  RESOLVED
+  ESCALATED
+}
+
+model EmergencyAlert {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("UserEmergencies", fields: [userId], references: [id], onDelete: Cascade)
+
+  type     EmergencyType
+  status   EmergencyStatus @default(ACTIVE)
+  message  String?
+  location String? // Optional location info
+
+  respondedBy String? // Counselor who responded
+  respondedAt DateTime?
+  resolution  String? // How it was resolved
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+}
+
+// 2. DIGITAL SIGNIFICANT ORDER (QR EXCUSE VERIFICATION)
+enum ExcuseStatus {
+  ACTIVE
+  USED
+  EXPIRED
+  REVOKED
+}
+
+model DigitalExcuse {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("UserExcuses", fields: [userId], references: [id], onDelete: Cascade)
+
+  counselorId   String
+  counselor     User         @relation("CounselorExcuses", fields: [counselorId], references: [id])
+  appointmentId String?      @unique
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id])
+
+  qrCode     String       @unique // Unique QR code string
+  excuseDate DateTime // Date of excuse
+  validUntil DateTime // Expiration date
+  status     ExcuseStatus @default(ACTIVE)
+
+  // What faculty sees (no private info)
+  publicReason String // e.g., "Counseling Session"
+
+  // Scan tracking
+  scannedBy String? // Faculty name/ID who scanned
+  scannedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([qrCode])
+  @@index([validUntil, status])
+}
+
+// 3. JOURNAL ENTRIES
+model JournalEntry {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("UserJournals", fields: [userId], references: [id], onDelete: Cascade)
+
+  date    DateTime @default(now())
+  title   String?
+  content String // Journal text
+  mood    String? // Optional mood at time of writing
+  tags    String[] @default([]) // Custom tags
+
+  isPrivate Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, date])
+}
+
+// 4. VENTING WALL (ANONYMOUS, FEMALE ONLY)
+enum PostStatus {
+  ACTIVE
+  REPORTED
+  HIDDEN
+  REMOVED
+}
+
+model VentPost {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("UserVentPosts", fields: [userId], references: [id], onDelete: Cascade)
+
+  content     String
+  isAnonymous Boolean    @default(true)
+  status      PostStatus @default(ACTIVE)
+
+  reports VentReport[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status, createdAt])
+}
+
+model VentReport {
+  id     String   @id @default(cuid())
+  postId String
+  post   VentPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  reportedBy String
+  reporter   User   @relation("UserVentReports", fields: [reportedBy], references: [id])
+
+  reason  String
+  details String?
+
+  reviewed Boolean @default(false)
+  action   String? // Action taken by admin
+
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+  @@index([reportedBy])
+  @@index([reviewed])
+}
+
+// 5. USER WARNINGS (3 STRIKES SYSTEM)
+enum WarningReason {
+  INAPPROPRIATE_CONTENT
+  HARASSMENT
+  SPAM
+  VIOLATION
+  OTHER
+}
+
+model UserWarning {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("UserWarnings", fields: [userId], references: [id], onDelete: Cascade)
+
+  reason   WarningReason
+  details  String
+  issuedBy String // Admin/Counselor who issued
+
+  postId String? // Related vent post if applicable
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// 6. RESOURCE LIBRARY (OFFLINE PDFs/AUDIO)
+enum ResourceType {
+  PDF
+  AUDIO
+  VIDEO
+  ARTICLE
+  GUIDE
+}
+
+enum ResourceCategory {
+  MENTAL_HEALTH
+  STRESS_MANAGEMENT
+  RELATIONSHIPS
+  ACADEMICS
+  SELF_CARE
+  CRISIS
+  OTHER
+}
+
+model Resource {
+  id String @id @default(cuid())
+
+  title       String
+  description String?
+  type        ResourceType
+  category    ResourceCategory
+
+  // File info
+  fileUrl  String // URL to file
+  fileName String
+  fileSize Int? // Size in bytes
+  duration Int? // For audio/video (seconds)
+
+  // Offline capability
+  offlineAvailable Boolean @default(false)
+
+  // Metadata
+  author String?
+  source String? // e.g., "WikiHow"
+  tags   String[] @default([])
+
+  viewCount Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category, type])
+  @@index([offlineAvailable])
+}
+
+// 7. STREAK & REWARDS SYSTEM
+enum TaskType {
+  JOURNAL_ENTRY
+  MOOD_CHECK_IN
+  COUNSELING_SESSION
+  RESOURCE_READ
+  DAILY_LOGIN
+}
+
+model UserStreak {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation("UserStreak", fields: [userId], references: [id], onDelete: Cascade)
+
+  currentStreak Int       @default(0)
+  longestStreak Int       @default(0)
+  totalCheckIns Int       @default(0)
+  lastCheckIn   DateTime?
+
+  // Points system
+  totalPoints Int @default(0)
+
+  updatedAt DateTime @updatedAt
+}
+
+model TaskCompletion {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("UserTaskCompletions", fields: [userId], references: [id], onDelete: Cascade)
+
+  taskType TaskType
+  date     DateTime @default(now())
+  points   Int      @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, taskType, date])
+  @@index([userId, date])
+}
+
+// 8. COUNSELOR SESSION NOTES (PRIVATE)
+model SessionNote {
+  id            String      @id @default(cuid())
+  appointmentId String      @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  counselorId String
+  counselor   User   @relation("CounselorNotes", fields: [counselorId], references: [id])
+
+  studentId String
+  student   User   @relation("StudentNotes", fields: [studentId], references: [id])
+
+  notes           String // Private clinical notes
+  observations    String?
+  recommendations String?
+  followUp        DateTime? // Next recommended session
+
+  isConfidential Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([counselorId, studentId])
+}
+
+// 9. MOTIVATIONAL QUOTES
+model MotivationalQuote {
+  id String @id @default(cuid())
+
+  quote    String
+  author   String?
+  category String? // e.g., "motivation", "resilience", "self-care"
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+}
+
+// 10. MONTHLY SUMMARY
+model MonthlySummary {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("UserMonthlySummaries", fields: [userId], references: [id], onDelete: Cascade)
+
+  year  Int
+  month Int // 1-12
+
+  // Mood statistics
+  totalMoodEntries     Int     @default(0)
+  averageMoodIntensity Float?
+  dominantMood         String?
+
+  // Journal statistics
+  totalJournalEntries Int @default(0)
+
+  // Appointments
+  totalAppointments     Int @default(0)
+  completedAppointments Int @default(0)
+
+  // Streak & engagement
+  checkInDays   Int @default(0)
+  currentStreak Int @default(0)
+  pointsEarned  Int @default(0)
+
+  // Resources
+  resourcesViewed Int @default(0)
+
+  // AI-generated insights (optional)
+  insights        String?
+  recommendations String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, year, month])
+  @@index([userId])
+}
+
+// 11. IN-APP NOTIFICATIONS/REMINDERS
+enum NotificationType {
+  APPOINTMENT_REMINDER
+  STREAK_REMINDER
+  CHECK_IN_REMINDER
+  FOLLOW_UP
+  SYSTEM
+  EMERGENCY_RESPONSE
+}
+
+model Notification {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+
+  type    NotificationType
+  title   String
+  message String
+
+  isRead Boolean @default(false)
+
+  // Optional action links
+  actionUrl  String?
+  actionData String? // JSON string for additional data
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
