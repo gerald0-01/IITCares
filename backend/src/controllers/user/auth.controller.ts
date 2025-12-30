@@ -46,78 +46,84 @@ export const register = async (req: Request<{}, {}, registerType>, res: Response
 }
 
 export const login = async (req: Request, res: Response) => {
-    try {
-        const { email, password } = req.body
-        const loggedIn = req.user
+  try {
+    const { email, password } = req.body;
 
-        if (loggedIn) return res.status(400).json({message: "You're already logged in!"})
-
-        //Check if all fields aren't blank
-        if (!email || !password) return res.status(400).json({message: "Don't leave blanks."})
-
-        //Check if user exist
-        const user = await prisma.user.findUnique({where: {email}})
-        if (!user) return res.status(400).json({message: "Invalid Credentials."})
-
-        //Check if password is correct
-        const check = await comparePassword(password, user.password)
-        if (!check) return res.status(400).json({message: "Invalid Credentials."})
-
-        //Check if email is verified
-        if (!user.emailVerified) {
-            const token = await emailVerifyToken(user.id)
-            console.log("Sending verification email to:", email);
-            await sendMail({
-                to: email,
-                subject: "Verify your account",
-                html: `
-                    <p>Hi!</p>
-                    <p>Click the link below to verify your account:</p>
-                    <a href="${process.env.FRONTEND_URL}/auth/verify-email?token=${token}">Verify Email</a>
-                    <p>This link expires in 1 hour.</p>
-                `
-            })
-            console.log("Email sent");
-            return res.status(400).json({message: "Email not verified yet. Verify now"})
-        }
-
-        //Generate Tokens
-        const refreshToken = await generateRefreshToken(user.id)
-        const accessToken = await generateAccessToken({userId: user.id, role: user.role})
-
-        
-        // Set cookies for Postman/manual testing
-        res.cookie("refreshToken", refreshToken, {
-            httpOnly: true,
-            secure: false, // true in prod
-            sameSite: "lax",
-        });
-        // Provide access token in Authorization header for testing
-        res.setHeader('Authorization', `Bearer ${accessToken}`);
-
-        res.status(200).json({
-            message: "User logged in successfully!",
-            accessToken,
-            refreshToken
-        })
-    } catch (err) {
-        console.log("Login Error: " +  err)
-        res.status(500).json({error: err})
+    // Basic validation
+    if (!email || !password) {
+      return res.status(400).json({ message: "Don't leave blanks." });
     }
-}
 
-
-export const logoout = async (req: Request, res: Response) => {
-    try {
-        const { refreshToken } = req.body;
-
-        await prisma.token.deleteMany({
-            where: { token: refreshToken }
-        });
-
-        res.json({ message: "Logged out" });
-    } catch (error) {
-        console.error('Logout error:', error);
-        res.status(500).json({ error: 'Failed to log out user!' });
+    // Find user
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(400).json({ message: "Invalid credentials." });
     }
-}
+
+    // Check password
+    const isValid = await comparePassword(password, user.password);
+    if (!isValid) {
+      return res.status(400).json({ message: "Invalid credentials." });
+    }
+
+    // Check email verification
+    if (!user.emailVerified) {
+      const token = await emailVerifyToken(user.id);
+
+      await sendMail({
+        to: email,
+        subject: "Verify your account",
+        html: `
+          <p>Hi!</p>
+          <p>Click the link below to verify your account:</p>
+          <a href="${process.env.FRONTEND_URL}/auth/verify-email?token=${token}">
+            Verify Email
+          </a>
+          <p>This link expires in 1 hour.</p>
+        `,
+      });
+
+      return res.status(400).json({
+        message: "Email not verified yet. Verification email sent.",
+      });
+    }
+
+    // Generate tokens
+    const accessToken = await generateAccessToken({
+      userId: user.id,
+      role: user.role,
+    });
+
+    const refreshToken = await generateRefreshToken(user.id);
+
+    // ✅ JSON ONLY
+    return res.status(200).json({
+      message: "User logged in successfully!",
+      accessToken,
+      refreshToken,
+    });
+  } catch (err) {
+    console.error("Login Error:", err);
+    return res.status(500).json({ error: "Login failed" });
+  }
+};
+
+
+export const logout = async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({ message: "No refresh token provided" });
+    }
+
+    await prisma.token.deleteMany({
+      where: { token: refreshToken },
+    });
+
+    return res.json({ message: "Logged out successfully" });
+  } catch (error) {
+    console.error("Logout error:", error);
+    return res.status(500).json({ error: "Failed to log out user" });
+  }
+};

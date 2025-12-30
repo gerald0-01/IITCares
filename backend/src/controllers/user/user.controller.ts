@@ -3,6 +3,7 @@ import { prisma } from "../../lib/prisma"
 import { generateAccessToken, generateRefreshToken, passResetToken } from "../../lib/auth/generateToken"
 import { sendMail } from "../../lib/emailer"
 import { hashPassword } from "../../lib/auth/bcrypt"
+import jwt from "jsonwebtoken"
 
 export const verifyEmail = async (req: Request, res: Response) => {
     try {
@@ -67,44 +68,56 @@ export const passwordReset = async (req: Request, res: Response) => {
 }
 
 export const refresh = async (req: Request, res: Response) => {
-    const refreshToken = req.cookies?.refreshToken;
+  try {
+    const { refreshToken } = req.body;
+
     if (!refreshToken) {
-        return res.status(401).json({ message: "Missing refresh token" });
+      return res.status(401).json({ message: "Missing refresh token" });
+    }
+
+    // Optional but recommended: verify JWT signature
+    try {
+      jwt.verify(refreshToken, process.env.REFRESH_TOKEN!);
+    } catch {
+      return res.status(401).json({ message: "Invalid refresh token" });
     }
 
     const storedToken = await prisma.token.findUnique({
-        where: { token: refreshToken }
+      where: { token: refreshToken },
     });
-
-    console.log(refreshToken)
 
     if (!storedToken || storedToken.expiresAt < new Date()) {
-        return res.status(401).json({ message: "Invalid refresh token" });
+      return res.status(401).json({ message: "Invalid refresh token" });
     }
 
-    const user = await prisma.user.findUnique({where: {id: storedToken.userId}})
+    const user = await prisma.user.findUnique({
+      where: { id: storedToken.userId },
+    });
 
-    if (!user) return res.status(400).json({message: "User not found!"})
+    if (!user) {
+      return res.status(400).json({ message: "User not found" });
+    }
 
-    // 🔄 ROTATE
+    // 🔄 ROTATE refresh token
     await prisma.token.delete({
-        where: { token: refreshToken }
+      where: { token: refreshToken },
     });
 
-    const newRefreshToken = await generateRefreshToken(user.id)
-    const accessToken = await generateAccessToken({userId: user.id, role: user.role})
-
-        
-    // Set cookies so Postman can persist tokens between requests
-    res.cookie("refreshToken", newRefreshToken, {
-        httpOnly: true,
-        secure: false, // true in prod
-        sameSite: "lax",
+    const newRefreshToken = await generateRefreshToken(user.id);
+    const newAccessToken = await generateAccessToken({
+      userId: user.id,
+      role: user.role,
     });
-    // Provide access token in Authorization header
-    res.setHeader('Authorization', `Bearer ${accessToken}`);
 
-    res.json({ accessToken, refreshToken: newRefreshToken })
+    // ✅ JSON ONLY RESPONSE
+    return res.json({
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+    });
+  } catch (error) {
+    console.error("Refresh error:", error);
+    return res.status(500).json({ message: "Failed to refresh token" });
+  }
 };
 
 export const updateRole = async (req: Request, res: Response) => {
@@ -112,7 +125,6 @@ export const updateRole = async (req: Request, res: Response) => {
         const { role } = req.body
         const id = req.user?.id
 
-        console.log(id)
         await prisma.user.update({
             where: {id},
             data: {role}
